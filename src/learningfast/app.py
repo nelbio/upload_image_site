@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 from sqlalchemy import select
 from src.learningfast.images import imagekit
-from imagekitio.models.UploadFileRequestOptions import UploadFileRequestOptions
 import shutil
 import os
 import uuid
@@ -27,19 +26,18 @@ async def upload_file(
      temp_file_path = None
 
      try:
-        with tempfile.NamedTemporaryfile(delete=False, suffix=os.path.splittext(file.filename)[1]) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
             temp_file_path = temp_file.name
             shutil.copyfileobj(file.file, temp_file)
 
-        upload_result = imagekit.upload_file(
+        upload_result = imagekit.files.upload(
             file=open(temp_file_path, "rb"),
             file_name=file.filename,
-            options=UploadFileRequestOptions(
-                use_unique_file_name=True,
-                tags=["backend-upload"]
-            )
+            use_unique_file_name=True,
+            tags=["backend-upload"]
+            
         ) 
-        if upload_result.response.http_status_code == 200:
+        if upload_result.url:
             post = Post(
                  caption=caption,
                 url=upload_result.url,
@@ -51,6 +49,8 @@ async def upload_file(
             await session.refresh(post)
             return post
      except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
         pass
      finally:
@@ -80,3 +80,23 @@ async def get_feed(
             }
         )
     return {"posts": posts_data}   
+
+
+@app.delete("/posts/{post_id}")
+async def delete_post(post_id: str, session: AsyncSession = Depends(get_async_session)):
+    try:
+        post_uuid = uuid.UUID(post_id)
+
+        result = await session.execute(select(Post).where(Post.id == post_uuid))
+        post = result.scalars().first()
+
+        if not post:
+            raise  HTTPException(status_code=404, detail="Post not found")
+
+        await session.delete(post)
+        await session.commit()
+
+        return {"success":True, "message": "Post delete successfully"}
+    except Exception as e:
+            raise HTTPException(status_code=404, detail=str(e))   
+
